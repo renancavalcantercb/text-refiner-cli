@@ -1,13 +1,13 @@
 
 # Text Refiner CLI
 
-**Text Refiner CLI** is a command-line tool that refines text by improving grammar, clarity, and structure using the OpenAI GPT-4 API.
+**Text Refiner CLI** is a command-line tool that refines text by improving grammar, clarity, and structure using the OpenAI GPT-4o-mini API.
 
 ## Features
 
 - Refines and improves text input.
 - Flexible input options: pass the text directly as a command-line argument or input it interactively.
-- Powered by GPT-4 from OpenAI.
+- Powered by GPT-4o-mini from OpenAI.
 - Easy to use, with API credentials securely stored in a `.env` file.
 
 ## Installation
@@ -15,7 +15,7 @@
 ### Prerequisites
 
 - [Go](https://golang.org/doc/install) 1.18 or later installed on your machine.
-- An [OpenAI API key](https://platform.openai.com/signup) with access to the GPT-4 model.
+- An [OpenAI API key](https://platform.openai.com/signup) with access to the GPT-4o-mini model.
 - A `.env` file with your OpenAI API key.
 
 ### Cloning the repository
