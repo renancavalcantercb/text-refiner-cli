@@ -78,11 +78,11 @@ func main() {
 	}
 
 	reqBody := OpenAIRequest{
-		Model: "gpt-4",
+		Model: "gpt-4o-mini",
 		Messages: []Message{
 			{
 				Role:    "user",
-				Content: "Improve this text: " + inputText,
+				Content: "Improve this text and only return the improved text: " + inputText,
 			},
 		},
 	}
