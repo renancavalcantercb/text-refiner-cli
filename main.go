@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	"github.com/joho/godotenv"
 )
 
@@ -48,6 +49,7 @@ func main() {
 	}
 
 	textPtr := flag.String("text", "", "Text to improve")
+	copyPtr := flag.Bool("copy", false, "Copy the improved text to the clipboard")
 	flag.Parse()
 
 	var inputText string
@@ -120,8 +122,17 @@ func main() {
 	}
 
 	if len(openAIResp.Choices) > 0 {
+		improvedText := openAIResp.Choices[0].Message.Content
 		fmt.Println("Improved text:")
-		fmt.Println(openAIResp.Choices[0].Message.Content)
+		fmt.Println(improvedText)
+
+		if *copyPtr {
+			err := clipboard.WriteAll(improvedText)
+			if err != nil {
+				log.Fatalf("Error copying text to clipboard: %v", err)
+			}
+			fmt.Println("Improved text copied to clipboard")
+		}
 	} else {
 		log.Fatal("No response from OpenAI API or choices are empty")
 	}
