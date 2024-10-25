@@ -50,8 +50,18 @@ func main() {
 
 	textPtr := flag.String("text", "", "Text to improve")
 	langPtr := flag.String("lang", "en-us", "Language for the improvement (options: en-us, pt-br, aliases: en, pt)")
+	langAlias := flag.String("l", "en-us", "Alias for -lang")
 	copyPtr := flag.Bool("copy", false, "Copy the improved text to the clipboard")
+	copyAlias := flag.Bool("c", false, "Alias for -copy")
 	flag.Parse()
+
+	if *langAlias != "en-us" {
+		*langPtr = *langAlias
+	}
+
+	if *copyAlias {
+		*copyPtr = true
+	}
 
 	langMap := map[string]string{
 		"en":    "en-us",
