@@ -49,8 +49,21 @@ func main() {
 	}
 
 	textPtr := flag.String("text", "", "Text to improve")
+	langPtr := flag.String("lang", "en-us", "Language for the improvement (options: en-us, pt-br, aliases: en, pt)")
 	copyPtr := flag.Bool("copy", false, "Copy the improved text to the clipboard")
 	flag.Parse()
+
+	langMap := map[string]string{
+		"en":    "en-us",
+		"pt":    "pt-br",
+		"en-us": "en-us",
+		"pt-br": "pt-br",
+	}
+
+	lang, ok := langMap[*langPtr]
+	if !ok {
+		log.Fatalf("Invalid language option: %s. Please use 'en-us', 'pt-br', 'en' or 'pt'.", *langPtr)
+	}
 
 	var inputText string
 
@@ -82,7 +95,7 @@ func main() {
 		Messages: []Message{
 			{
 				Role:    "user",
-				Content: "Improve this text and only return the improved text: " + inputText,
+				Content: fmt.Sprintf("Improve this text in %s and only return the improved text: %s", lang, inputText),
 			},
 		},
 	}
