@@ -4,17 +4,27 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/joho/godotenv"
 )
+
+type AppConfig struct {
+	OpenAIModel        string `json:"openai_model"`
+	OpenAIAPIEndpoint  string `json:"openai_api_endpoint"`
+	RequestTimeoutSecs int    `json:"request_timeout_seconds"`
+	DefaultLanguage    string `json:"default_language"`
+	OpenAIAPIKey       string
+}
 
 type OpenAIRequest struct {
 	Model    string    `json:"model"`
@@ -37,126 +47,159 @@ type OpenAIResponse struct {
 	} `json:"error"`
 }
 
-func main() {
-	err := godotenv.Load(".env")
-	if err != nil {
-		log.Fatalf("Error loading .env file")
-	}
-
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		log.Fatal("API key not found in .env")
-	}
-
-	textPtr := flag.String("text", "", "Text to improve")
-	langPtr := flag.String("lang", "en-us", "Language for the improvement (options: en-us, pt-br, aliases: en, pt)")
-	langAlias := flag.String("l", "en-us", "Alias for -lang")
-	copyPtr := flag.Bool("copy", false, "Copy the improved text to the clipboard")
-	copyAlias := flag.Bool("c", false, "Alias for -copy")
-	flag.Parse()
-
-	if *langAlias != "en-us" {
-		*langPtr = *langAlias
-	}
-
-	if *copyAlias {
-		*copyPtr = true
-	}
-
-	langMap := map[string]string{
+var (
+	httpClient         = &http.Client{}
+	supportedLanguages = map[string]string{
 		"en":    "en-us",
 		"pt":    "pt-br",
 		"en-us": "en-us",
 		"pt-br": "pt-br",
 	}
+)
 
-	lang, ok := langMap[*langPtr]
-	if !ok {
-		log.Fatalf("Invalid language option: %s. Please use 'en-us', 'pt-br', 'en' or 'pt'.", *langPtr)
+func main() {
+	config, err := loadAppConfig()
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	var inputText string
+	text, lang, copyToClipboard := parseFlags()
 
-	if *textPtr != "" {
-		inputText = *textPtr
-	} else {
-		fmt.Println("Please enter the text to improve (press Enter twice or Ctrl+D to finish):")
-
-		scanner := bufio.NewScanner(os.Stdin)
-		var sb strings.Builder
-
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line == "" {
-				break
-			}
-			sb.WriteString(line + " ")
-		}
-
-		if err := scanner.Err(); err != nil {
-			log.Fatalf("Error reading input: %v", err)
-		}
-
-		inputText = sb.String()
+	if lang == "" {
+		lang = config.DefaultLanguage
 	}
 
-	reqBody := OpenAIRequest{
-		Model: "gpt-4o-mini",
+	validatedLang, err := validateLanguage(lang)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	httpClient.Timeout = time.Duration(config.RequestTimeoutSecs) * time.Second
+
+	inputText := getInputText(text)
+
+	response, err := callOpenAI(config.OpenAIAPIKey, OpenAIRequest{
+		Model: config.OpenAIModel,
 		Messages: []Message{
 			{
 				Role:    "user",
-				Content: fmt.Sprintf("Improve this text in %s and only return the improved text: %s", lang, inputText),
+				Content: fmt.Sprintf("Improve this text in %s and only return the improved text: %s", validatedLang, inputText),
 			},
 		},
+	}, config.OpenAIAPIEndpoint)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	jsonData, err := json.Marshal(reqBody)
+	improvedText := response.Choices[0].Message.Content
+	fmt.Println("Improved text:")
+	fmt.Println(improvedText)
+
+	if copyToClipboard {
+		if err := clipboard.WriteAll(improvedText); err != nil {
+			log.Fatalf("Error copying to clipboard: %v", err)
+		}
+		fmt.Println("Improved text copied to clipboard!")
+	}
+}
+
+func loadAppConfig() (*AppConfig, error) {
+	file, err := os.Open("config.json")
 	if err != nil {
-		log.Fatalf("Error serializing request: %v", err)
+		return nil, fmt.Errorf("error opening config file: %w", err)
+	}
+	defer file.Close()
+
+	var config AppConfig
+	if err := json.NewDecoder(file).Decode(&config); err != nil {
+		return nil, fmt.Errorf("error decoding config file: %w", err)
 	}
 
-	client := &http.Client{}
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonData))
-	if err != nil {
-		log.Fatalf("Error creating request: %v", err)
+	if err := godotenv.Load(".env"); err != nil {
+		return nil, fmt.Errorf("error loading .env file: %w", err)
 	}
+	config.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
+	if config.OpenAIAPIKey == "" {
+		return nil, errors.New("OPENAI_API_KEY not set in .env file")
+	}
+
+	return &config, nil
+}
+
+func parseFlags() (text, lang string, copy bool) {
+	flag.StringVar(&text, "text", "", "Text to be improved")
+	flag.StringVar(&lang, "lang", "", "Language for improvement (en-us or pt-br)")
+	flag.StringVar(&lang, "l", "", "Alias for -lang")
+	flag.BoolVar(&copy, "copy", false, "Copy improved text to clipboard")
+	flag.BoolVar(&copy, "c", false, "Alias for -copy")
+
+	flag.Parse()
+	return
+}
+
+func getInputText(flagText string) string {
+	if flagText != "" {
+		return flagText
+	}
+
+	fmt.Println("Enter text to be improved (press Enter twice or Ctrl+D to finish):")
+	scanner := bufio.NewScanner(os.Stdin)
+	var sb strings.Builder
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			break
+		}
+		sb.WriteString(line + "\n")
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+func validateLanguage(lang string) (string, error) {
+	if validated, ok := supportedLanguages[strings.ToLower(lang)]; ok {
+		return validated, nil
+	}
+	return "", fmt.Errorf("invalid language option: %s", lang)
+}
+
+func callOpenAI(apiKey string, request OpenAIRequest, endpoint string) (OpenAIResponse, error) {
+	jsonData, err := json.Marshal(request)
+	if err != nil {
+		return OpenAIResponse{}, fmt.Errorf("error serializing request: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return OpenAIResponse{}, fmt.Errorf("error creating request: %w", err)
+	}
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
-		log.Fatalf("Error making the request: %v", err)
+		return OpenAIResponse{}, fmt.Errorf("error making request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("Error reading the response: %v", err)
+		return OpenAIResponse{}, fmt.Errorf("error reading response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return OpenAIResponse{}, fmt.Errorf("HTTP status not OK (%s): %s", resp.Status, string(body))
 	}
 
 	var openAIResp OpenAIResponse
-	err = json.Unmarshal(body, &openAIResp)
-	if err != nil {
-		log.Fatalf("Error deserializing the response: %v", err)
+	if err := json.Unmarshal(body, &openAIResp); err != nil {
+		return OpenAIResponse{}, fmt.Errorf("error deserializing response: %w", err)
 	}
 
 	if openAIResp.Error.Message != "" {
-		log.Fatalf("OpenAI API error: %v", openAIResp.Error.Message)
+		return OpenAIResponse{}, fmt.Errorf("OpenAI API error: %s", openAIResp.Error.Message)
 	}
 
-	if len(openAIResp.Choices) > 0 {
-		improvedText := openAIResp.Choices[0].Message.Content
-		fmt.Println("Improved text:")
-		fmt.Println(improvedText)
-
-		if *copyPtr {
-			err := clipboard.WriteAll(improvedText)
-			if err != nil {
-				log.Fatalf("Error copying text to clipboard: %v", err)
-			}
-			fmt.Println("Improved text copied to clipboard")
-		}
-	} else {
-		log.Fatal("No response from OpenAI API or choices are empty")
-	}
+	return openAIResp, nil
 }

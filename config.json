@@ -1,0 +1,6 @@
+{
+  "openai_model": "gpt-4o-mini",
+  "openai_api_endpoint": "https://api.openai.com/v1/chat/completions",
+  "request_timeout_seconds": 30,
+  "default_language": "en-US"
+}
